@@ -1,23 +1,10 @@
 (function () {
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
-      // Moodle loads RequireJS on every page, so `window.define` (AMD) is
-      // always present. UMD-wrapped libraries like marked.js check for AMD
-      // first and, if found, register themselves as an anonymous module
-      // inside RequireJS instead of exposing a plain global (e.g. `window.marked`).
-      // Hiding `define` while the script executes forces the UMD fallback
-      // path, which does set the global we rely on.
-      var savedDefine = window.define;
-      window.define = undefined;
-
       var s = document.createElement('script');
       s.src = src;
-      s.onload = function () {
-        window.define = savedDefine;
-        resolve();
-      };
+      s.onload = resolve;
       s.onerror = function () {
-        window.define = savedDefine;
         reject(new Error('Failed to load ' + src));
       };
       document.head.appendChild(s);
@@ -58,6 +45,22 @@
     }
   }
 
+  // Moodle loads RequireJS on every page, so `window.define` (AMD) is always
+  // present. UMD-wrapped libraries like marked.js check for AMD first and, if
+  // found, register themselves as an anonymous module inside RequireJS
+  // instead of exposing a plain global (e.g. `window.marked`). Hiding
+  // `define` for the whole batch -- not per script -- matters because the
+  // three libraries load concurrently: a per-script save/restore lets one
+  // script's onload put the real `define` back while a sibling script is
+  // still executing, non-deterministically causing that sibling to register
+  // as an AMD module instead.
+  var savedDefine = window.define;
+  window.define = undefined;
+
+  function restoreDefine() {
+    window.define = savedDefine;
+  }
+
   Promise.all([
     loadScript('https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js'),
     loadScript('https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js').then(function () {
@@ -68,7 +71,11 @@
       ]);
     }),
     loadScript('https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js')
-  ]).then(render).catch(function (err) {
+  ]).then(function () {
+    restoreDefine();
+    render();
+  }).catch(function (err) {
+    restoreDefine();
     console.error('moodlecraft render error:', err);
   });
 })();
