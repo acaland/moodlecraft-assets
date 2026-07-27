@@ -1,23 +1,4 @@
 (function () {
-  function loadScript(src) {
-    return fetch(src).then(function (r) {
-      if (!r.ok) throw new Error('Failed to fetch ' + src + ' (' + r.status + ')');
-      return r.text();
-    }).then(function (code) {
-      // Execute with `define`/`module`/`exports` shadowed as local
-      // parameters (always undefined here), not the real globals, so
-      // UMD-wrapped libraries like marked.js take their plain-global
-      // branch instead of registering as an AMD module. We deliberately
-      // never touch the real `window.define`: Moodle's own RequireJS sets
-      // it only transiently while loading Moodle's own AMD modules
-      // (including well after initial page load, e.g. when the course
-      // index drawer lazily loads its modules), so any approach that
-      // hides/restores the real global -- even briefly -- races against
-      // Moodle's own module loading and can break unrelated page chrome.
-      (new Function('define', 'module', 'exports', code))(undefined, undefined, undefined);
-    });
-  }
-
   function render() {
     var source = document.getElementById('gfm-source');
     var content = document.getElementById('gfm-moodle-content');
@@ -52,17 +33,26 @@
     }
   }
 
-  Promise.all([
-    loadScript('https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js'),
-    loadScript('https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js').then(function () {
-      return Promise.all([
-        loadScript('https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js'),
-        loadScript('https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js'),
-        loadScript('https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-sql.min.js')
-      ]);
-    }),
-    loadScript('https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js')
-  ]).then(render).catch(function (err) {
-    console.error('moodlecraft render error:', err);
-  });
+  // Moodle's own page bootstrap (RequireJS core modules, the reactive course
+  // index drawer, etc.) runs concurrently with anything we load
+  // asynchronously (dynamically-created <script> tags, fetch()+eval). That
+  // overlap silently breaks unrelated Moodle page chrome -- observed: the
+  // course index drawer stays stuck on its loading placeholder, with no
+  // console error at all. A classic, statically-authored `<script src>` tag
+  // does NOT have this problem, because the HTML parser blocks on it,
+  // guaranteeing it finishes (fetch + execute) before the parser reaches
+  // Moodle's own footer bootstrap scripts later in the page -- no overlap is
+  // possible. `document.write` from within a synchronously-executing classic
+  // script re-creates that same blocking, in-order behaviour for a stack of
+  // dependencies from a single external file, without listing every
+  // dependency inline in the page source.
+  window.__moodlecraftRender = render;
+
+  document.write('<script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"><\/script>');
+  document.write('<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"><\/script>');
+  document.write('<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"><\/script>');
+  document.write('<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"><\/script>');
+  document.write('<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-sql.min.js"><\/script>');
+  document.write('<script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"><\/script>');
+  document.write('<script>window.__moodlecraftRender();<\/script>');
 })();
